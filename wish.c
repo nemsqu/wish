@@ -13,40 +13,50 @@ struct command {
 typedef struct command COMMAND;
 
 struct path {
-    char path[264];
+    char *path;
     struct path *pNext;
 };
 typedef struct path PATH;
 
 COMMAND *add_command_to_list(COMMAND *pCommand, char **params, int commandNro, char *outputFile){
-    printf("ADDING\n");
     COMMAND *pNew = NULL, *ptr = NULL;
 
     if((pNew = malloc(sizeof(COMMAND))) == NULL){
-        char error_message[30] = "An error has occurred\n";
+        char error_message[50] = "Error allocating memory when adding command\n";
         write(STDERR_FILENO, error_message, strlen(error_message));
+        exit(1);
     }
-    printf("malloc 1\n");
     pNew->number = commandNro;
     pNew->outputFile = outputFile;
     pNew->pNext = NULL;
 
+    // initialize memory for parameters
     if ((pNew->params = malloc(sizeof(char*))) == NULL) {
-        fprintf(stderr, "Malloc failed.\n");
+        char error_message[50] = "Error allocating memory when adding command\n";
+        write(STDERR_FILENO, error_message, strlen(error_message));
         exit(1);
     }
-    printf("malloc 2\n");
+
+    // add parameters
     int i = 0;
     while(params[i] != NULL){
-        pNew->params = realloc(pNew->params, (i+1)*sizeof(char*));
+        if((pNew->params = realloc(pNew->params, (i+1)*sizeof(char*))) == NULL){
+            char error_message[50] = "Error allocating memory when adding command\n";
+            write(STDERR_FILENO, error_message, strlen(error_message));
+            exit(1);
+        }
         pNew->params[i] = params[i];
         i++;
     }
-    pNew->params = realloc(pNew->params, (i+1)*sizeof(char*));
+   if((pNew->params = realloc(pNew->params, (i+1)*sizeof(char*))) == NULL){
+        char error_message[50] = "Error allocating memory when adding command\n";
+        write(STDERR_FILENO, error_message, strlen(error_message));
+        exit(1);
+    }
     pNew->params[i] = NULL;
 
+    // add command to list
     if(pCommand == NULL){
-        printf("**************** YES IT IS ********************\n");
         pCommand = pNew;
     } else {
         ptr = pCommand;
@@ -64,9 +74,6 @@ COMMAND *empty_commands(COMMAND *pCommand){
     while(pCommand != NULL){
         ptr = pCommand;
         pCommand = ptr->pNext;
-        if(ptr == NULL){
-            printf("should not happen");
-        }
         free(ptr->params);
         free(ptr);
     }
@@ -83,33 +90,44 @@ PATH *empty_paths(PATH *path){
         free(path);
         path = ptr;
     }
+    return path;
 }
 
 PATH *add_paths(char *buffer, PATH *path){
-    //remove newline so that it doesn't mess up the (last) path
+    // remove newline so that it doesn't mess up the (last) path
     buffer[strcspn(buffer, "\n")] = 0;
 
-    //cut away command "path"
+    // cut away command "path"
     strtok(buffer, " ");
     char *newPath = strtok(NULL, " ");
     PATH *ptr;
 
+    // delete all paths if no new path has been implemented
     if(newPath == NULL){
-        char error_message[30] = "An error has occurred\n";
-        write(STDERR_FILENO, error_message, strlen(error_message));
+        if(path != NULL){
+            path = empty_paths(path);
+        }
     } else {
+        // clear old paths
         if(path != NULL){
             path = empty_paths(path);
         }
         while(newPath != NULL){
             PATH *pNew = NULL;
             if((pNew = malloc(sizeof(PATH))) == NULL){
-                //ERROR
+                char error_message[50] = "Error allocating memory when adding path\n";
+                write(STDERR_FILENO, error_message, strlen(error_message));
+                exit(1);
+            }
+            if((pNew->path = malloc(strlen(newPath) * sizeof(char))) == NULL){
+                char error_message[50] = "Error allocating memory when adding path\n";
+                write(STDERR_FILENO, error_message, strlen(error_message));
+                exit(1);
             }
             strcpy(pNew->path, newPath);
-            printf("%ld\n", strlen(newPath));
             pNew->pNext = NULL;
 
+            // add path to list
             if(path == NULL){
                 path = pNew;
             } else {
@@ -122,44 +140,61 @@ PATH *add_paths(char *buffer, PATH *path){
             newPath = strtok(NULL, " ");
         }
     }
-    /*int z = 0;
-    while(z < paths){
-        printf("%s\n", path[z]);
-        z++;
-    }*/
     return path;
 }
 
 
-void run_shell(){
+void run_shell(int batchMode, FILE *input){
     char *buffer = NULL;
-    size_t len = 0;
-    size_t read;
+    size_t len = 0, read;
+    // use char pointer array https://newton.ex.ac.uk/teaching/resources/jmr/p2.html
     char **params = NULL;
-    char *tok;
-    pid_t pid;
+    char *tok, *defaultPath = "/bin";
     int status;
-    char *defaultPath = "/bin";
     PATH *path = NULL;
     COMMAND *pCommand = NULL;
 
-    printf("Wish> ");
-    path = malloc(sizeof(PATH)); // TODO: ADD ERROR CHECK
+    // only print prompt in interactive mode
+    if(batchMode == 0){
+        printf("Wish> ");
+    }
+    // initialize path
+    if((path = malloc(sizeof(PATH))) == NULL){
+        char error_message[50] = "Error allocating memory when adding path\n";
+        write(STDERR_FILENO, error_message, strlen(error_message));
+        exit(1);
+    }
+    if((path->path = malloc(strlen(defaultPath) * sizeof(char))) == NULL){
+        char error_message[50] = "Error allocating memory when adding path\n";
+        write(STDERR_FILENO, error_message, strlen(error_message));
+        exit(1);
+    }
     strcpy(path->path, defaultPath);
     path->pNext = NULL;
-    while((read = getline(&buffer, &len, stdin)) != -1){
 
+    // run shell
+    while((read = getline(&buffer, &len, input)) != -1){
         //check built-in commands
         char command[5] = "";
         strncpy(command, buffer, 4);
         command[4] = '\0';
         if(strcmp(command, "path") == 0){
-            printf("Path?\n");
             path = add_paths(buffer, path);
-            printf("Wish> ");
+            if(batchMode == 0){
+                printf("Wish> ");
+            }
             continue;
         }
         if(strcmp(command, "exit") == 0){
+            // Inputing stuff after exit is an error
+            if(read > 5){
+                char error_message[30] = "Incorrect input\n";
+                write(STDERR_FILENO, error_message, strlen(error_message));
+                if(batchMode == 0){
+                    printf("Wish> ");
+                }
+                continue;
+            }
             empty_commands(pCommand);
             if(params != NULL){
                 free(params);
@@ -175,139 +210,244 @@ void run_shell(){
         cdCommand[2] = '\0';
         
         if(strcmp(cdCommand, "cd") == 0){
-            //cut away command "cd"
+            //cut away command part "cd"
             strtok(buffer, " ");
             char *arg = NULL;
             arg = strtok(NULL, "\n");
-            printf("%s\n", arg);
+
             if(arg == NULL || strtok(NULL, " ") != NULL){
-                char error_message[30] = "An error has occurred\n";
+                char error_message[30] = "Incorrect input\n";
                 write(STDERR_FILENO, error_message, strlen(error_message));
             } else {
-                printf("Changing directories with chdir()\n");
                 if(chdir(arg) != 0){
-                    char error_message[30] = "An error has occurred\n";
+                    char error_message[50] = "Error with changing directory\n";
                     write(STDERR_FILENO, error_message, strlen(error_message));
                 }
             }
-            printf("Wish> ");
+            if(batchMode == 0){
+                printf("Wish> ");
+            }
             continue;
         }
-        //remove newline so that it doesn't confuse execv
+        //remove newline so that it doesn't confuse execv https://stackoverflow.com/questions/2693776/removing-trailing-newline-character-from-fgets-input
         buffer[strcspn(buffer, "\n")] = 0;
         tok = strtok(buffer, " ");
-        //command[strlen(command)-1] = '\0';
-        // tok = strtok(NULL, " ");
-        // printf("param: %s\n", tok);
+        
         params = malloc(sizeof(char *));
-        int i = 1, fileOutputError = 0, commands = 1;
-        char *outputFile = NULL;
+        int i = 1, fileOutputError = 0, commands = 0;
+        char *outputFile = NULL, *commandPart = NULL;
+        // parse through commands and parameters
         while(tok != NULL){
             if(strcmp(tok, ">") == 0){
+                if(params[0] == NULL){
+                    // Invalid input, no command to output to the file
+                    fileOutputError = 1;
+                    char error_message[30] = "Incorrect input\n";
+                    write(STDERR_FILENO, error_message, strlen(error_message));
+                    break;
+                }
                 outputFile = strtok(NULL, " ");
-                if((strcmp(outputFile, ">") == 0) || (strtok(NULL, " ") != NULL)){
+                // check if there's data after the filename
+                tok = strtok(NULL, " ");
+                if((outputFile == NULL) || (strcmp(outputFile, ">") == 0) || (tok != NULL && (strcmp(tok, "&") != 0))){
                     outputFile = NULL;
                     fileOutputError = 1;
-                    char error_message[30] = "An error has occurred\n";
+                    char error_message[30] = "Incorrect input\n";
                     write(STDERR_FILENO, error_message, strlen(error_message));
+                    break;
                 }
-                break;
+                continue;
             } else if(strcmp(tok, "&") == 0){
+                // new command, add previous command and parameters to list
                 params[i-1] = NULL;
-                pCommand = add_command_to_list(pCommand, params, commands, outputFile);
                 commands++;
+                pCommand = add_command_to_list(pCommand, params, commands, outputFile);
                 free(params);
-                params = malloc(sizeof(char*));
+                if((params = malloc(sizeof(char*))) == NULL){
+                    char error_message[50] = "Error allocating memory when adding params\n";
+                    write(STDERR_FILENO, error_message, strlen(error_message));
+                    exit(1);
+                }
                 i = 1;
                 tok = strtok(NULL, " ");
                 continue;
+            } else if(strchr(tok, '>') != NULL){
+                // user didn't include a whitespace before token
+                commandPart = strtok(tok, ">");
+                outputFile = strtok(NULL, " ");
+                if((outputFile == NULL) || (strcmp(outputFile, ">") == 0) || (strtok(NULL, " ") != NULL)){
+                    outputFile = NULL;
+                    fileOutputError = 1;
+                    char error_message[30] = "Incorrect input\n";
+                    write(STDERR_FILENO, error_message, strlen(error_message));
+                }
+                if((params = realloc(params, (i+1)*sizeof(char *))) == NULL){
+                    char error_message[50] = "Error allocating memory when adding params\n";
+                    write(STDERR_FILENO, error_message, strlen(error_message));
+                    exit(1);
+                }
+                params[i-1] = commandPart;
+                i++;
+                break;
             }
-            //printf("realloc next new %ld old %ld\n", (i+1)*sizeof(char *), sizeof(params));
-            params = realloc(params, (i+1)*sizeof(char *)); //TODO error handling
-            //printf("realloc 2\n");
+            else if(strchr(tok, '&') != NULL){
+                // user inputted multiple commands without a whitespace in between
+                char *nextround = strtok(NULL, " ");
+                char *param = strtok(tok, "&");
+                char *string = strtok(NULL, " ");
+                // add command and parameters to list
+                params[i-1] = param;
+                if((params = realloc(params, (i+1)*sizeof(char *))) == NULL){
+                    char error_message[50] = "Error allocating memory when adding params\n";
+                    write(STDERR_FILENO, error_message, strlen(error_message));
+                    exit(1);
+                }
+                i++;
+                params[i-1] = NULL;
+                commands++;
+                pCommand = add_command_to_list(pCommand, params, commands, outputFile);
+                // initialize params for next command
+                free(params);
+                if((params = malloc(sizeof(char*))) == 0){
+                    char error_message[50] = "Error allocating memory when adding params\n";
+                    write(STDERR_FILENO, error_message, strlen(error_message));
+                    exit(1);
+                }
+                i = 1;
+                // check if there are more commands
+                while(strchr(string, '&') != NULL){
+                    param = strtok(string, "&");
+                    string = strtok(NULL, "");
+                    params[i-1] = param;
+                    if((params = realloc(params, (i+1)*sizeof(char *))) == NULL){
+                        char error_message[50] = "Error allocating memory when adding params\n";
+                        write(STDERR_FILENO, error_message, strlen(error_message));
+                        exit(1);
+                    }
+                    i++;
+                    params[i-1] = NULL;
+                    commands++;
+                    pCommand = add_command_to_list(pCommand, params, commands, outputFile);
+                    free(params);
+                    params = malloc(sizeof(char*));
+                    i = 1;
+                }
+                // adding last command to list
+                if(string != NULL){
+                    params[i-1] = string;
+                    if((params = realloc(params, (i+1)*sizeof(char *))) == 0){
+                        char error_message[50] = "Error allocating memory when adding params\n";
+                        write(STDERR_FILENO, error_message, strlen(error_message));
+                        exit(1);
+                    }
+                    i++;
+                    params[i-1] = NULL;
+                    commands++;
+                    pCommand = add_command_to_list(pCommand, params, commands, outputFile);
+                    free(params);
+                    if((params = malloc(sizeof(char*))) == NULL){
+                        char error_message[50] = "Error allocating memory when adding params\n";
+                        write(STDERR_FILENO, error_message, strlen(error_message));
+                        exit(1);
+                    }
+                    i = 1;
+                }
+                tok = nextround;
+                continue;
+            }
+
+            // first command or parameter related to previous command
+            if((params = realloc(params, (i+1)*sizeof(char *))) == NULL){
+                char error_message[50] = "Error allocating memory when adding params\n";
+                write(STDERR_FILENO, error_message, strlen(error_message));
+                exit(1);
+            }
             params[i-1] = tok;
             i++;
             tok = strtok(NULL, " ");
         }
+        // continue to next round if there was a problem with output file
         if(fileOutputError == 1){
-            printf("Wish> ");
+            if(batchMode == 0){
+                printf("Wish> ");
+            }
             continue;
         }
-        params = realloc(params, (i+1)*sizeof(char *)); //TODO error handling
-        printf("realloc 3\n");
-        params[i-1] = NULL;
-        pCommand = add_command_to_list(pCommand, params, commands, outputFile);
-        //debug: check params
-        COMMAND *testi;
-        testi = pCommand;
-        while(testi != NULL){
-            int f = 0;
-            printf("Valmis: %d ", testi->number);
-            while(testi->params[f] != NULL){
-                printf("%s ", testi->params[f]);
-                f++;
-            }
-            printf("\n");
-            testi = testi->pNext;
+        // add last command to list
+        if((params = realloc(params, (i+1)*sizeof(char *))) == NULL){
+            char error_message[50] = "Error allocating memory when adding params\n";
+            write(STDERR_FILENO, error_message, strlen(error_message));
+            exit(1);
         }
+        params[i-1] = NULL;
+        commands++;
+        pCommand = add_command_to_list(pCommand, params, commands, outputFile);
+
+        // create a thread for each command
         pid_t pids[commands];
         for(int nPid = 0; nPid<commands; nPid++){
             pids[nPid] = fork();
-            printf("%d\n", pids[nPid]);
-            printf("nPid: %d, commands: %d\n",nPid, commands);
+
             switch (pids[nPid]) {
                 case -1: {
-                    char error_message[30] = "An error has occurred\n";
+                    char error_message[50] = "An error has occurred when starting thread\n";
                     write(STDERR_FILENO, error_message, strlen(error_message));
                 }
                 case 0: {
                     COMMAND *wanted = pCommand;
 
                     wanted = pCommand;
-                    while(wanted->number != nPid+1){
-                        //printf("Loopissa: %d\n", wanted->number);
+                    // find the command this thread should execute
+                    while(wanted->number != nPid+1 && wanted != NULL){
                         wanted = wanted->pNext;
                     }
 
+                    // command couldn't be found, something went wrong
+                    if(wanted == NULL){
+                        char error_message[50] = "Could not find command to execute\n";
+                        write(STDERR_FILENO, error_message, strlen(error_message));
+                        break;
+                    }
+
+                    // check through all paths if command is available
                     int available = 0;
                     char fullPath[264] = "";
                     PATH *pathptr = path;
                     while(pathptr != NULL){
-                    //for (int x = 0; x < strlen(path); x++){
-                        printf("Path[x] = %s\n", pathptr->path);
                         strcpy(fullPath, "");
                         strcat(fullPath, pathptr->path);
-                        //fullPath = realloc(fullPath, sizeof(fullPath) + sizeof("/"));
                         strcat(fullPath, "/");
-                        //fullPath = realloc(fullPath, sizeof(fullPath) + sizeof(params[0]));
                         strcat(fullPath, wanted->params[0]);
-                        printf("Path: %s\n", fullPath);
+
                         if(access(fullPath, X_OK) == 0){
                             available = 1;
                             break;
                         }
                         pathptr = pathptr->pNext;
                     }
-                    printf("%d\n", available);
+
                     if(available == 0){
-                        char error_message[30] = "An error has occurred\n";
+                        char error_message[30] = "Command not in path\n";
                         write(STDERR_FILENO, error_message, strlen(error_message));
                     }
                     else {
+                        // check which output to use
                         if(wanted->outputFile != NULL){
                             FILE *pFile = fopen(wanted->outputFile, "w");
                             if (pFile==NULL) {
-                                char error_message[30] = "An error has occurred\n";
+                                char error_message[50] = "Could not open output file\n";
                                 write(STDERR_FILENO, error_message, strlen(error_message));
+                                break;
                             }
-                            //change output from stdout to file
+                            //change output of execv from stdout to file https://stackoverflow.com/questions/2605130/redirecting-exec-output-to-a-buffer-or-file
                             dup2(fileno(pFile), fileno(stdout));
                             fclose(pFile);
                         }
-                        printf("executing\n");
+                        
                         if(execv(fullPath, wanted->params)  == -1) {
                             char error_message[30] = "An error has occurred\n";
                             write(STDERR_FILENO, error_message, strlen(error_message));
+                            break;
                         }
                         //program should not continue after execv: something went wrong if this part is reached
                         char error_message[30] = "An error has occurred\n";
@@ -318,34 +458,43 @@ void run_shell(){
         }
         int n = commands;
         pid_t pid;
+        // wait for threads to finish
         while(n > 0){
-                if ((pid = wait(&status)) == -1) {
-                        perror("wait");
-                        exit(1);
-                }
-                printf("Child %ld died, status: 0x%X\n", (long)pid, status);
-                break;
+            if ((pid = wait(&status)) == -1) {
+                    exit(1);
+            }
             n--;
         }
 
+        // empty previous commands before next round
         pCommand = empty_commands(pCommand);
-        
-        printf("Memory freed\n");
-        printf("Wish> ");
+        if(batchMode == 0){
+            printf("Wish> ");
+        }
     }
 }
 
 int main(int argc, char *argv[]){
+    // too many parameters
     if(argc > 2){
-        char error_message[30] = "An error has occurred\n";
+        char error_message[30] = "Invalid input\n";
         write(STDERR_FILENO, error_message, strlen(error_message));
+        exit(1);
     }
     else if(argc == 1){
-        run_shell();
+        // interactive mode
+        run_shell(0, stdin);
     }
     else {
         // batch mode
+        FILE *pfile;
+        if((pfile = fopen(argv[1], "r")) == NULL){
+            char error_message[30] = "Could not open batch file\n";
+            write(STDERR_FILENO, error_message, strlen(error_message));
+            exit(1);
+        }
+        run_shell(1, pfile);
+        fclose(pfile);
     }
-
     return 0;
 }
