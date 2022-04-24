@@ -4,6 +4,8 @@ Wish is a simple Unix shell that can run most common commands. It can be run in 
 
 ## Usage
 
+Download or clone the code before continuing. Then run the following commands in the folder the code is in.
+
 To compile the program run:
 
     gcc wish.c -o wish
